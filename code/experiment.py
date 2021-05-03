@@ -100,7 +100,7 @@ def text_preprocess(dataset):
         dataset['text'][i] = decision
 
 
-def feature_selection(text, label, k):
+def feature_selection(text, label, percentage):
     term_count_dict = {}
     type_count_dict = {}
 
@@ -118,7 +118,7 @@ def feature_selection(text, label, k):
             type_dict[term] = term_frequency + 1
             term_count_dict[decision_type] = type_dict
 
-    # filter
+    # filter terms that appear only once
     for decision_type in type_count_dict.keys():
         for term in list(term_count_dict[decision_type].keys()):
             if term_count_dict[decision_type][term] < 2:
@@ -145,15 +145,17 @@ def feature_selection(text, label, k):
             type_dict[term] = chi2_value
             term_chi2_dict[decision_type] = type_dict
 
+    # For each decision type, we chose the top n percent of the terms as feature terms
     total_feature_terms = set()
 
     for decision_type in type_count_dict.keys():
         sort_after = dict(sorted(term_chi2_dict[decision_type].items(), key=lambda item: item[1], reverse=True))
         feature_terms_for_decision_type = list(sort_after.keys())
 
-        topN = round(len(feature_terms_for_decision_type) * (k / 100))
+        topN = round(len(feature_terms_for_decision_type) * (percentage / 100))
         total_feature_terms |= set(feature_terms_for_decision_type[:topN])
 
+    # For each decision, we only retain terms that are feature terms
     for i in range(len(text)):
         filtered_decision = []
         for t in text[i]:
@@ -187,6 +189,7 @@ def word2vec(data):
     for s in data:
         decision_sentences.append(str(s).split(' '))
 
+    # We set the length as 100 for the word vector
     vec_size = 100
 
     model = gensim.models.word2vec.Word2Vec(decision_sentences, size=vec_size)
@@ -215,12 +218,13 @@ def word2vec(data):
 
 
 def training_and_evaluation(technique, name, model, data, label, report):
+    # We repeat stratified 10-fold cross validation for ten times
     pre_results = cross_validate(model, data, label,
                                  cv=RepeatedStratifiedKFold(n_splits=10, n_repeats=10, random_state=0),
                                  scoring=['precision_weighted', 'recall_weighted', 'f1_weighted'],
                                  return_estimator=True)
 
-    # Evaluate classifiers by weighted precision, recall, and F1-score
+    # Evaluate classifiers by weighted precision, weighted recall, and weighted F1-score
     weighted_avg_precision = np.mean(pre_results['test_precision_weighted'])
     weighted_avg_recall = np.mean(pre_results['test_recall_weighted'])
     weighted_avg_f1 = np.mean(pre_results['test_f1_weighted'])
@@ -233,8 +237,9 @@ def training_and_evaluation(technique, name, model, data, label, report):
         print("\n")
 
 
-def train_classifiers(feature_extraction_technique, data, label, report):
-    # Four base classifiers and five ensemble classifiers using soft voting
+def get_classifiers(feature_extraction_technique, data, label, report):
+    # Four base classifiers and five ensemble classifiers using soft voting.
+    # In order to replicate our experiment, we set the random_state = 0 for the classifiers if necessary.
 
     classifiers = [
         ('NB', naive_bayes.MultinomialNB(alpha=1.0)),
@@ -293,7 +298,11 @@ def experiment():
     data = dataset['text'].tolist()
     label = dataset['label'].tolist()
 
-    data = feature_selection(data, label, 50)
+    # the percentage of selected features in feature selection (i.e., the n in the Section 3.3 of the paper)
+    # valid range: 1 - 100
+    percentage = 50
+
+    data = feature_selection(data, label, percentage)
 
     # Feature extraction techniques
     feature_extraction_techniques = [
@@ -303,7 +312,7 @@ def experiment():
     ]
 
     for technique, data in feature_extraction_techniques:
-        train_classifiers(technique, data, label, True)
+        get_classifiers(technique, data, label, True)
 
 
 if __name__ == "__main__":
